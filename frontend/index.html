@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Oil Forecaster Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; }
+    .pulse { animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% {opacity:1} 50% {opacity:0.4} }
+    .regime-pill { padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; }
+    .r-normal { background: #1e293b; color: #93c5fd; }
+    .r-war_regime { background: #7f1d1d; color: #fecaca; }
+    .r-sanctions_regime { background: #78350f; color: #fde68a; }
+    .r-crisis_regime { background: #581c87; color: #e9d5ff; }
+    .r-opec_regime { background: #14532d; color: #bbf7d0; }
+    .r-normal_regime { background: #1e293b; color: #cbd5e1; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+
+  <header class="border-b border-slate-800 px-6 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold">🛢️ Oil Forecaster</h1>
+      <p class="text-xs text-slate-400">ML + LLM forecasting with regime awareness</p>
+    </div>
+    <div class="flex gap-2">
+      <button onclick="loadForecast()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm">
+        Refresh Forecast
+      </button>
+    </div>
+  </header>
+
+  <main class="container mx-auto p-6 space-y-6 max-w-7xl">
+
+    <!-- Top row: current state -->
+    <section class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div class="bg-slate-900 p-4 rounded-lg border border-slate-800">
+        <div class="text-slate-400 text-xs">Current WTI</div>
+        <div class="text-3xl font-bold mt-1" id="current-price">—</div>
+      </div>
+      <div class="bg-slate-900 p-4 rounded-lg border border-slate-800">
+        <div class="text-slate-400 text-xs">Predicted (5d)</div>
+        <div class="text-3xl font-bold mt-1" id="predicted">—</div>
+        <div class="text-xs mt-1" id="predicted-pct">—</div>
+      </div>
+      <div class="bg-slate-900 p-4 rounded-lg border border-slate-800">
+        <div class="text-slate-400 text-xs">Model Confidence</div>
+        <div class="text-3xl font-bold mt-1" id="confidence">—</div>
+      </div>
+      <div class="bg-slate-900 p-4 rounded-lg border border-slate-800">
+        <div class="text-slate-400 text-xs">Detected Regime</div>
+        <div class="text-lg font-bold mt-1" id="regime">—</div>
+      </div>
+    </section>
+
+    <!-- LLM analysis -->
+    <section class="bg-slate-900 p-6 rounded-lg border border-slate-800">
+      <h2 class="text-lg font-semibold mb-3">📊 LLM Analysis</h2>
+      <div id="llm-analysis" class="space-y-3 text-sm text-slate-300">
+        <p class="pulse text-slate-500">Loading...</p>
+      </div>
+    </section>
+
+    <!-- Price chart -->
+    <section class="bg-slate-900 p-6 rounded-lg border border-slate-800">
+      <h2 class="text-lg font-semibold mb-3">Price History (2 years)</h2>
+      <canvas id="priceChart" height="80"></canvas>
+    </section>
+
+    <!-- Active events + Top features -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="bg-slate-900 p-6 rounded-lg border border-slate-800">
+        <h2 class="text-lg font-semibold mb-3">🌍 Active Events</h2>
+        <div id="events" class="space-y-2 text-sm"></div>
+      </div>
+      <div class="bg-slate-900 p-6 rounded-lg border border-slate-800">
+        <h2 class="text-lg font-semibold mb-3">📈 Top Model Features</h2>
+        <div id="features" class="space-y-1 text-sm"></div>
+      </div>
+    </section>
+
+    <!-- Stress test -->
+    <section class="bg-slate-900 p-6 rounded-lg border border-slate-800">
+      <h2 class="text-lg font-semibold mb-3">🔬 Scenario Stress Test</h2>
+      <div class="flex gap-2 mb-3">
+        <input id="scenario-input" placeholder="e.g. Strait of Hormuz closes for 7 days"
+               class="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm" />
+        <button onclick="runStressTest()" class="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded text-sm">
+          Analyze
+        </button>
+      </div>
+      <div id="stress-result" class="text-sm text-slate-300 whitespace-pre-wrap"></div>
+    </section>
+
+  </main>
+
+  <script>
+    const API = window.location.origin + "/api/v1";
+    let priceChart;
+
+    async function loadForecast() {
+      try {
+        const r = await fetch(`${API}/forecast?with_llm=true`);
+        if (!r.ok) throw new Error(r.statusText);
+        const d = await r.json();
+
+        // KPIs
+        document.getElementById("current-price").textContent = "$" + d.current_price.toFixed(2);
+        const pct = d.forecast.predicted_pct_return * 100;
+        const projPrice = d.current_price * (1 + d.forecast.predicted_pct_return);
+        const sign = pct >= 0 ? "+" : "";
+        document.getElementById("predicted").textContent = "$" + projPrice.toFixed(2);
+        document.getElementById("predicted").className = "text-3xl font-bold mt-1 " +
+          (pct >= 0 ? "text-green-400" : "text-red-400");
+        document.getElementById("predicted-pct").textContent = `${sign}${pct.toFixed(2)}%`;
+        document.getElementById("confidence").textContent = (d.forecast.confidence * 100).toFixed(0) + "%";
+
+        const r_el = document.getElementById("regime");
+        r_el.textContent = d.regime;
+        r_el.className = `text-lg font-bold mt-1 regime-pill r-${d.regime}`;
+
+        // LLM analysis
+        const llm = d.interpretation;
+        const llmDiv = document.getElementById("llm-analysis");
+        if (llm) {
+          llmDiv.innerHTML = `
+            <p class="text-slate-200">${esc(llm.forecast_summary)}</p>
+            <div>
+              <div class="text-xs uppercase text-slate-500 mt-3 mb-1">Primary drivers</div>
+              <ul class="list-disc list-inside text-slate-300">
+                ${llm.primary_drivers.map(d => `<li>${esc(d)}</li>`).join("")}
+              </ul>
+            </div>
+            ${llm.historical_analogs && llm.historical_analogs.length ? `
+            <div>
+              <div class="text-xs uppercase text-slate-500 mt-3 mb-1">Historical analogs</div>
+              <ul class="list-disc list-inside text-slate-300">
+                ${llm.historical_analogs.map(a => `<li><strong>${esc(a.event)}</strong> (${a.year}) — ${esc(a.similarity_basis || '')}: ${esc(a.outcome || '')}</li>`).join("")}
+              </ul>
+            </div>` : ""}
+            <div>
+              <div class="text-xs uppercase text-slate-500 mt-3 mb-1">Risk factors</div>
+              <ul class="list-disc list-inside text-slate-300">
+                ${llm.risk_factors.map(d => `<li>${esc(d)}</li>`).join("")}
+              </ul>
+            </div>
+            <p class="text-xs text-slate-500 mt-3">${esc(llm.confidence_qualifier)}</p>
+          `;
+        } else {
+          llmDiv.innerHTML = `<p class="text-slate-500">LLM analysis unavailable</p>`;
+        }
+
+        // Events
+        const evDiv = document.getElementById("events");
+        if (d.active_events && d.active_events.length) {
+          evDiv.innerHTML = d.active_events.map(e => `
+            <div class="border-l-2 pl-3 py-1 ${severityColor(e.severity)}">
+              <div class="font-semibold">${esc(e.name)}</div>
+              <div class="text-xs text-slate-400">
+                ${e.event_type} · ${e.severity} · ${e.start_date} → ${e.end_date || 'ongoing'}
+              </div>
+            </div>`).join("");
+        } else {
+          evDiv.innerHTML = `<p class="text-slate-500 text-sm">No active major events</p>`;
+        }
+
+        // Top features
+        const ftDiv = document.getElementById("features");
+        ftDiv.innerHTML = (d.model_top_features || []).slice(0, 10).map(f => {
+          const pct = (f.importance * 100).toFixed(1);
+          return `
+            <div class="flex items-center gap-2">
+              <div class="w-32 truncate text-slate-300">${esc(f.feature)}</div>
+              <div class="flex-1 bg-slate-800 rounded h-2">
+                <div class="bg-blue-500 h-2 rounded" style="width:${Math.min(pct*5, 100)}%"></div>
+              </div>
+              <div class="w-12 text-right text-xs text-slate-400">${pct}%</div>
+            </div>`;
+        }).join("");
+
+      } catch (e) {
+        console.error(e);
+        document.getElementById("llm-analysis").innerHTML =
+          `<p class="text-red-400">Error: ${e.message}. Has the model been trained?</p>`;
+      }
+    }
+
+    async function loadChart() {
+      try {
+        const r = await fetch(`${API}/data/price-history?days=730`);
+        if (!r.ok) return;
+        const d = await r.json();
+        const ctx = document.getElementById("priceChart").getContext("2d");
+        if (priceChart) priceChart.destroy();
+        priceChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: d.data.map(p => p.date),
+            datasets: [{
+              label: "WTI Close",
+              data: d.data.map(p => p.price),
+              borderColor: "rgb(96, 165, 250)",
+              backgroundColor: "rgba(96, 165, 250, 0.1)",
+              fill: true, tension: 0.2, pointRadius: 0, borderWidth: 1.5,
+            }]
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: { type: "time", ticks: { color: "#94a3b8" }, grid: { color: "#1e293b" } },
+              y: { ticks: { color: "#94a3b8" }, grid: { color: "#1e293b" } }
+            },
+            plugins: { legend: { labels: { color: "#cbd5e1" } } },
+          }
+        });
+      } catch (e) { console.error(e); }
+    }
+
+    async function runStressTest() {
+      const scenario = document.getElementById("scenario-input").value.trim();
+      if (!scenario) return;
+      const out = document.getElementById("stress-result");
+      out.innerHTML = `<span class="pulse text-blue-400">🤖 Running LLM analysis...</span>`;
+      try {
+        const r = await fetch(`${API}/forecast/stress-test`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenario, horizon_days: 30 })
+        });
+        const d = await r.json();
+        out.textContent = d.analysis || "No analysis returned";
+      } catch (e) {
+        out.innerHTML = `<span class="text-red-400">Error: ${e.message}</span>`;
+      }
+    }
+
+    function severityColor(sev) {
+      return {
+        extreme: "border-red-500",
+        high: "border-orange-500",
+        medium: "border-yellow-500",
+        low: "border-slate-500",
+      }[sev] || "border-slate-500";
+    }
+
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+        ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
+    }
+
+    loadForecast();
+    loadChart();
+    setInterval(loadForecast, 5 * 60 * 1000);  // 5min
+  </script>
+</body>
+</html>

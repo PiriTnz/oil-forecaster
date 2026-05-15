@@ -1,0 +1,58 @@
+# Weekly retraining job. Runs every Sunday at 2 AM UTC.
+# On-demand retraining can also be triggered with: kubectl create job --from=cronjob/...
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: oil-forecaster-train
+  namespace: oil-forecaster
+spec:
+  schedule: "0 2 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 7200  # 2 hours max
+      template:
+        metadata:
+          labels:
+            app: oil-forecaster-trainer
+            component: training
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: trainer
+              image: ghcr.io/YOUR_USERNAME/oil-forecaster-trainer:latest
+              imagePullPolicy: Always
+              command: ["python", "-m", "src.pipelines.train"]
+              args:
+                - --horizon
+                - "5"
+                - --artifacts
+                - /app/artifacts
+              envFrom:
+                - configMapRef:
+                    name: oil-forecaster-config
+                - secretRef:
+                    name: oil-forecaster-secrets
+              resources:
+                requests:
+                  cpu: 1000m
+                  memory: 4Gi
+                limits:
+                  cpu: 4000m
+                  memory: 8Gi
+              volumeMounts:
+                - name: artifacts
+                  mountPath: /app/artifacts
+                - name: data
+                  mountPath: /app/data
+          volumes:
+            - name: artifacts
+              persistentVolumeClaim:
+                claimName: artifacts-pvc
+            - name: data
+              persistentVolumeClaim:
+                claimName: data-pvc

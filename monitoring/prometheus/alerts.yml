@@ -1,0 +1,43 @@
+groups:
+  - name: oil_forecaster_alerts
+    interval: 30s
+    rules:
+      - alert: APIDown
+        expr: up{job="oil-forecaster-api"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Oil Forecaster API is down"
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(http_requests_total[5m])) > 0.05
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "API error rate >5% for 5min"
+
+      - alert: SlowForecasts
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{handler="/api/v1/forecast"}[10m]))
+            by (le)) > 30
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Forecast latency p95 > 30s"
+
+      - alert: TrainingJobFailed
+        expr: kube_job_status_failed{namespace="oil-forecaster", job_name=~"oil-forecaster-train.*"} > 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Training job failed - manual review required"
+
+      - alert: ModelStale
+        expr: time() - model_last_trained_timestamp_seconds > 1209600  # 14 days
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Model not retrained in over 14 days"

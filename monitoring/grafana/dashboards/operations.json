@@ -1,0 +1,50 @@
+{
+  "uid": "oil-forecaster",
+  "title": "Oil Forecaster - Operations",
+  "tags": ["oil", "ml", "forecasting"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "API Request Rate",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum(rate(http_requests_total[5m])) by (handler)", "legendFormat": "{{handler}}" }]
+    },
+    {
+      "id": 2,
+      "title": "API Error Rate (5xx)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m]))", "legendFormat": "5xx" }]
+    },
+    {
+      "id": 3,
+      "title": "Forecast Endpoint Latency (p50/p95/p99)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum(rate(http_request_duration_seconds_bucket{handler=\"/api/v1/forecast\"}[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{handler=\"/api/v1/forecast\"}[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{handler=\"/api/v1/forecast\"}[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Pod CPU",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"oil-forecaster\"}[5m])) by (pod)", "legendFormat": "{{pod}}" }]
+    },
+    {
+      "id": 5,
+      "title": "Pod Memory",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum(container_memory_working_set_bytes{namespace=\"oil-forecaster\"}) by (pod)", "legendFormat": "{{pod}}" }]
+    }
+  ]
+}
